@@ -6,21 +6,25 @@ import { createClaudeProvider } from './claude';
  * 预置的模型配置
  */
 const PRESETS: Record<string, { baseUrl: string; model: string }> = {
-  minimax: {
-    baseUrl: 'https://api.minimax.chat/v1',
-    model: 'MiniMax-Text-01',
-  },
   deepseek: {
     baseUrl: 'https://api.deepseek.com/v1',
     model: 'deepseek-chat',
   },
-  qwen: {
-    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    model: 'qwen-plus',
+  glm: {
+    baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+    model: 'glm-4-flash',
+  },
+  minimax: {
+    baseUrl: 'https://api.minimax.chat/v1',
+    model: 'MiniMax-Text-01',
   },
   openai: {
     baseUrl: 'https://api.openai.com/v1',
     model: 'gpt-4o',
+  },
+  qwen: {
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    model: 'qwen-plus',
   },
 };
 
@@ -31,7 +35,7 @@ let cachedProviderKey: string | null = null;
  * 获取 LLM Provider（自动根据环境变量创建）
  *
  * 环境变量：
- *   LLM_PROVIDER  - 模型提供商：minimax / deepseek / qwen / openai / claude / custom
+ *   LLM_PROVIDER  - 模型提供商：deepseek / glm / minimax / qwen / openai / claude / custom
  *   LLM_API_KEY   - API Key
  *   LLM_MODEL     - 自定义模型名（可选，覆盖预设）
  *   LLM_BASE_URL  - 自定义 API 地址（可选，custom 时必填）
