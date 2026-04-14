@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { handleFeishuWebhook } from '@/services/feishu/bot';
+import { after } from 'next/server';
+import { handleFeishuWebhook, processMessage } from '@/services/feishu/bot';
 
 export async function POST(
   request: NextRequest,
@@ -29,6 +30,14 @@ export async function POST(
 
   if (result.type === 'challenge') {
     return NextResponse.json(result.body);
+  }
+
+  // 用 after() 在返回响应后继续处理消息
+  // Vercel 会保持函数存活直到 after() 完成
+  if (result.message) {
+    after(async () => {
+      await processMessage(slug, result.message!, { appId, appSecret });
+    });
   }
 
   return NextResponse.json({ code: 0 });

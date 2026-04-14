@@ -1,7 +1,6 @@
 import { verifySignature, isChallengeRequest } from '@/lib/feishu/verify';
 import { parseFeishuMessage, type ParsedMessage } from '@/lib/feishu/parser';
-import { getTenantToken, replyMessage } from '@/lib/feishu/client';
-import { chat } from '@/lib/ai/claude';
+import { getLLMProvider } from '@/lib/ai';
 import type { FeishuEventRequest } from '@/lib/feishu/types';
 
 export interface FeishuConfig {
@@ -15,10 +14,13 @@ export interface FeishuWebhookResult {
   type: 'challenge' | 'reply' | 'ignored' | 'error';
   body?: Record<string, unknown>;
   error?: string;
+  /** 解析后的消息，供路由层用 after() 异步处理 */
+  message?: ParsedMessage;
 }
 
 /**
- * 处理飞书 Webhook 请求的完整业务逻辑
+ * 处理飞书 Webhook 请求的验证和解析（不处理回复）
+ * 回复逻辑由路由层通过 after() 执行
  */
 export async function handleFeishuWebhook(
   rawBody: string,
@@ -63,25 +65,29 @@ export async function handleFeishuWebhook(
     return { type: 'ignored' };
   }
 
-  // 6. 异步处理消息（不阻塞响应）
-  processMessage(slug, message, config).catch((err) => {
-    console.error(`[${slug}] 处理消息失败:`, err);
-  });
-
-  return { type: 'reply' };
+  return { type: 'reply', message };
 }
 
-async function processMessage(
+/**
+ * 处理消息：调用 LLM → 回复飞书
+ * 由路由层在 after() 中调用
+ */
+export async function processMessage(
   slug: string,
   message: ParsedMessage,
   config: FeishuConfig,
 ) {
+  const { getTenantToken, replyMessage } = await import('@/lib/feishu/client');
+
   try {
-    const reply = await chat(message.text);
+    const provider = getLLMProvider();
+    const reply = await provider.chat(
+      [{ role: 'user', content: message.text }],
+    );
     const token = await getTenantToken(config.appId, config.appSecret);
     await replyMessage(token, message.messageId, reply);
   } catch (err) {
-    console.error(`[${slug}] Claude 调用失败:`, err);
+    console.error(`[${slug}] LLM 调用失败:`, err);
     try {
       const token = await getTenantToken(config.appId, config.appSecret);
       await replyMessage(token, message.messageId, '抱歉，处理消息时出错了，请稍后再试。');
