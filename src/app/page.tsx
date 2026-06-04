@@ -8,6 +8,11 @@ export default function Home() {
       description: '飞书 AI 机器人，接入 Claude 大模型',
     },
     {
+      name: 'Skills Top30',
+      slug: '/apps/skills',
+      description: '每日追踪 skills.sh 排行榜变化',
+    },
+    {
       name: 'Blog',
       slug: '/apps/blog',
       description: '博客（待开发）',

@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -E \"\\\\.\\(tsx|ts|js|jsx|json\\)$\")",
+      "Bash(pip3 install *)",
+      "Bash(python3 *)",
+      "Bash(gh repo *)",
+      "Bash(curl *)",
+      "Bash(npm install *)",
+      "Read(//Users/wuxiaobai/.claude/skills/**)",
+      "Bash(npx skills *)",
+      "Bash(npx next *)",
+      "Bash(npm run *)"
+    ]
+  }
+}
