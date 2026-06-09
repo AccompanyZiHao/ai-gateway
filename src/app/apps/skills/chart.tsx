@@ -113,8 +113,8 @@ export default function SkillChart({ skills, history }: SkillChartProps) {
                   color: "#e4e4e7",
                 }}
                 labelFormatter={(label) => formatDate(String(label))}
-                formatter={(value: number) => [
-                  formatInstalls(value),
+                formatter={(value) => [
+                  formatInstalls(Number(value)),
                   "日安装量",
                 ]}
               />
