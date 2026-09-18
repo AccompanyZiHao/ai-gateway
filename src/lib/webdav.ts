@@ -50,6 +50,27 @@ export async function putFile(
 }
 
 /**
+ * 读取一个文本文件，不存在（404）时返回 null
+ * 记账场景的「读-改-写」模式需要它：GET 旧内容 → 追加一行 → PUT 回去
+ */
+export async function getFile(
+  config: WebdavConfig,
+  filePath: string,
+): Promise<string | null> {
+  const resp = await fetch(`${config.baseUrl}/${filePath}`, {
+    method: 'GET',
+    headers: { Authorization: authHeader(config) },
+  });
+  if (resp.status === 404) {
+    return null;
+  }
+  if (!resp.ok) {
+    return null;
+  }
+  return resp.text();
+}
+
+/**
  * 从环境变量读取 WebDAV 配置，缺失时返回 null（调用方决定如何降级）
  */
 export function webdavConfigFromEnv(): WebdavConfig | null {

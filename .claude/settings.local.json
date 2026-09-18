@@ -10,7 +10,8 @@
       "Read(//Users/wuxiaobai/.claude/skills/**)",
       "Bash(npx skills *)",
       "Bash(npx next *)",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "WebSearch"
     ]
   }
 }
