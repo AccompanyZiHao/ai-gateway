@@ -7,8 +7,23 @@ import crypto from 'crypto';
  */
 
 /**
- * 企业微信签名校验：sha1(字典序排序 [token, timestamp, nonce, encrypted] 拼接)
+ * 企业微信签名计算：sha1(字典序排序 [token, timestamp, nonce, encrypted] 拼接)
  * 与测试号的验签算法一致，只是多了一个 encrypted 参数
+ */
+export function computeWecomSignature(
+  token: string,
+  timestamp: string,
+  nonce: string,
+  encrypted: string,
+): string {
+  return crypto
+    .createHash('sha1')
+    .update([token, timestamp, nonce, encrypted].sort().join(''))
+    .digest('hex');
+}
+
+/**
+ * 签名校验（收消息时用）
  */
 export function verifyWecomSignature(
   token: string,
@@ -17,11 +32,7 @@ export function verifyWecomSignature(
   encrypted: string,
   msgSignature: string,
 ): boolean {
-  const computed = crypto
-    .createHash('sha1')
-    .update([token, timestamp, nonce, encrypted].sort().join(''))
-    .digest('hex');
-  return computed === msgSignature;
+  return computeWecomSignature(token, timestamp, nonce, encrypted) === msgSignature;
 }
 
 /**
@@ -53,4 +64,31 @@ export function decryptWecomMessage(
   const message = plain.subarray(20, 20 + msgLen).toString('utf8');
   const receiveId = plain.subarray(20 + msgLen).toString('utf8');
   return { message, receiveId };
+}
+
+/**
+ * 加密被动回复内容（与解密互逆，receiveId 填企业 corpid）
+ * 明文结构同样是：16 随机 + 4 字节长度 + 消息 + receiveId，PKCS7 块长 32 填充
+ */
+export function encryptWecomMessage(
+  plainXml: string,
+  encodingAESKey: string,
+  receiveId: string,
+): string {
+  const key = Buffer.from(encodingAESKey + '=', 'base64');
+  const iv = key.subarray(0, 16);
+
+  const random = crypto.randomBytes(16);
+  const msgBuf = Buffer.from(plainXml, 'utf8');
+  const lenBuf = Buffer.alloc(4);
+  lenBuf.writeUInt32BE(msgBuf.length);
+  const data = Buffer.concat([random, lenBuf, msgBuf, Buffer.from(receiveId, 'utf8')]);
+
+  // 手动 PKCS7 填充（块长 32，差额全填 padLen，整块时补满 32）
+  const padLen = 32 - (data.length % 32);
+  const padded = Buffer.concat([data, Buffer.alloc(padLen, padLen)]);
+
+  const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
+  cipher.setAutoPadding(false);
+  return Buffer.concat([cipher.update(padded), cipher.final()]).toString('base64');
 }

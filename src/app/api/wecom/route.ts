@@ -1,14 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { after } from 'next/server';
-import { verifyWecomSignature, decryptWecomMessage } from '@/lib/wecom/crypto';
+import {
+  verifyWecomSignature,
+  decryptWecomMessage,
+  encryptWecomMessage,
+  computeWecomSignature,
+} from '@/lib/wecom/crypto';
 import { parseWecomXml } from '@/lib/wecom/parser';
 import { processWecomMessage } from '@/services/wecom/bot';
 
 /**
- * 企业微信自建应用回调入口
+ * 企业微信自建应用回调入口（被动回复版）
  * GET：服务器配置验证（保存回调配置时触发，解密 echostr 后原样返回明文）
- * POST：消息推送（密文 XML），验签 + 解密后立即回 success，
- *       实际处理放 after() 里 —— 化解微信 5 秒超时 + 重试机制
+ * POST：消息推送（密文 XML），验签 + 解密 → 同步处理（写坚果云）→
+ *       把回复加密后直接写进响应体（5 秒窗口内），不调企业微信 API，
+ *       因此不依赖可信 IP 白名单（Vercel 出口 IP 不固定）
  */
 
 function envConfig(): { token: string; aesKey: string } | null {
@@ -18,6 +23,37 @@ function envConfig(): { token: string; aesKey: string } | null {
     return null;
   }
   return { token, aesKey };
+}
+
+/**
+ * 组装被动回复的完整密文响应体（企业微信要求的固定 XML 壳）
+ */
+function buildEncryptedReply(
+  replyText: string,
+  msg: { fromUserName: string; toUserName: string },
+  config: { token: string; aesKey: string },
+): string {
+  const createTime = Math.floor(Date.now() / 1000);
+  const nonce = Math.random().toString(36).slice(2, 12);
+
+  // 回复明文 XML：To/From 与收到的消息互换（发给谁 / 以谁的身份）
+  const plainXml = `<xml>
+<ToUserName><![CDATA[${msg.fromUserName}]]></ToUserName>
+<FromUserName><![CDATA[${msg.toUserName}]]></FromUserName>
+<CreateTime>${createTime}</CreateTime>
+<MsgType><![CDATA[text]]></MsgType>
+<Content><![CDATA[${replyText}]]></Content>
+</xml>`;
+
+  const encrypted = encryptWecomMessage(plainXml, config.aesKey, msg.toUserName);
+  const msgSignature = computeWecomSignature(config.token, String(createTime), nonce, encrypted);
+
+  return `<xml>
+<Encrypt><![CDATA[${encrypted}]]></Encrypt>
+<MsgSignature><![CDATA[${msgSignature}]]></MsgSignature>
+<TimeStamp>${createTime}</TimeStamp>
+<Nonce><![CDATA[${nonce}]]></Nonce>
+</xml>`;
 }
 
 export async function GET(request: NextRequest) {
@@ -77,20 +113,29 @@ export async function POST(request: NextRequest) {
   const { message } = decryptWecomMessage(encrypted, config.aesKey);
   const msg = parseWecomXml(message);
   if (!msg) {
-    // 无法解析的消息体，回 success 避免重试
+    // 无法解析的消息体，回空串避免重试
     console.error('[wecom] parse decrypted xml failed:', message.slice(0, 200));
-    return new NextResponse('success');
+    return new NextResponse('');
   }
 
-  // 先回 success 断掉微信的 5s 计时器，再用 after() 在响应后入库 + 应用消息回复
-  after(async () => {
-    try {
-      await processWecomMessage(msg);
-    } catch (err) {
-      // after() 里的异常微信侧完全感知不到，不捕获就会静默丢失
-      console.error('[wecom] process failed:', err);
-    }
-  });
+  // 同步处理 + 被动回复；留 4.2s 上限防超时（超 5s 企业微信会断开并重试）
+  // 超时兜底返回空串（企业微信视为不回复，不触发重试风暴）
+  const TIMEOUT_MS = 4200;
+  const reply = await Promise.race([
+    processWecomMessage(msg),
+    new Promise<string | null>((resolve) =>
+      setTimeout(() => resolve(null), TIMEOUT_MS),
+    ),
+  ]);
 
-  return new NextResponse('success');
+  if (reply === null) {
+    // 处理超时：后台任务可能仍在跑（入库或许成功），只是不回消息了
+    console.error('[wecom] process timeout, reply skipped');
+    return new NextResponse('');
+  }
+
+  const body = buildEncryptedReply(reply, msg, config);
+  return new NextResponse(body, {
+    headers: { 'Content-Type': 'text/xml; charset=utf-8' },
+  });
 }
