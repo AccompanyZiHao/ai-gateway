@@ -73,6 +73,8 @@ async function replyText(toUser: string, content: string): Promise<void> {
     } | null;
     if (result?.errcode) {
       console.error('[wechat] reply err:', JSON.stringify(result));
+    } else {
+      console.log('[wechat] replied:', toUser);
     }
   } catch (err) {
     // 回复失败不影响入库，但错误要留痕（否则就是「完全不回」的无头案）
@@ -191,6 +193,10 @@ async function processAccounting(msg: WechatMessage): Promise<void> {
     // 失败重试一次（坚果云偶发抖动）
     ok = await putFile(config, filePath, content);
   }
+  if (ok) {
+    // 成功也留痕：普通用户记账落盘位置
+    console.log('[wechat] accounting saved:', filePath, line);
+  }
 
   await replyText(
     msg.fromUserName,
@@ -227,7 +233,12 @@ source: wechat
 ${body}
 `;
   await ensureDirectory(config, 'inbox');
-  return putFile(config, fileName, content);
+  const ok = await putFile(config, fileName, content);
+  if (ok) {
+    // 兜底成功也留痕：能从日志直接看出这条消息走了兜底
+    console.log('[wechat] fallback inbox saved:', fileName, `(${reason})`);
+  }
+  return ok;
 }
 
 /**
@@ -294,6 +305,10 @@ async function processAdminAccounting(
 
   const content = `${existing.replace(/\s*$/, '')}\n\n${line}\n`;
   const ok = await putFile(config, filePath, content);
+  if (ok) {
+    // 成功也留痕：管理员 #记 写入了哪个日志文件
+    console.log('[wechat] #记 saved to daily log:', filePath, line);
+  }
   await replyText(
     msg.fromUserName,
     ok
@@ -357,6 +372,8 @@ export async function processWechatMessage(msg: WechatMessage): Promise<void> {
   }
 
   if (ok) {
+    // 成功也留痕：收集消息落盘的文件名
+    console.log('[wechat] inbox saved:', fileName);
     await replyText(msg.fromUserName, `✅ 已收录 → ${fileName}`);
     // 未配置管理员时，附带一次 openid 提示（配置后此提示不再出现，他人也看不到）
     if (!adminOpenid) {
