@@ -18,6 +18,14 @@ import {
  */
 
 /**
+ * 取北京时间（Vercel 服务器时区是 UTC，直接用本地时间会差 8 小时，
+ * 文件命名和 create time 都会错位 —— 显式加 8 小时偏移）
+ */
+function nowBeijing(): Date {
+  return new Date(Date.now() + 8 * 3600 * 1000);
+}
+
+/**
  * 把消息组装成 inbox 条目的 markdown 内容（格式对齐 vault 的 AGENTS.md 规范）
  */
 function buildMarkdown(msg: WecomMessage, time: Date): string {
@@ -57,7 +65,7 @@ async function writeInboxFallback(
   if (!config) {
     return false;
   }
-  const now = new Date();
+  const now = nowBeijing();
   const pad = (n: number) => String(n).padStart(2, '0');
   const timeStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}  ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
   const fileName = buildFileName(msg, now);
@@ -96,7 +104,7 @@ async function processAccounting(msg: WecomMessage): Promise<string> {
     return '目前只开放记账功能：发「早餐 12」这样的文字即可';
   }
 
-  const now = new Date();
+  const now = nowBeijing();
   const pad = (n: number) => String(n).padStart(2, '0');
   const month = `${now.getFullYear()}-${pad(now.getMonth() + 1)}`;
   const timeStr = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
@@ -174,7 +182,7 @@ async function processAdminAccounting(
   const line = `[${category}:: ${entry.note} ¥${entry.amount}]`;
 
   // 当日日志路径（与 vault 的月度目录格式一致：「9 月」有空格）
-  const now = new Date();
+  const now = nowBeijing();
   const pad = (n: number) => String(n).padStart(2, '0');
   const filePath = `log/${now.getFullYear()}/${now.getMonth() + 1} 月/${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}.md`;
 
@@ -231,7 +239,7 @@ export async function processWecomMessage(msg: WecomMessage): Promise<string> {
     return '目前先支持文字收集，语音/图片在路上';
   }
 
-  const now = new Date();
+  const now = nowBeijing();
   const fileName = buildFileName(msg, now);
 
   // 确保目录存在后写入（失败重试一次，坚果云偶发抖动）

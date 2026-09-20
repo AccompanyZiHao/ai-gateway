@@ -17,6 +17,14 @@ import {
 let cachedToken: { value: string; expiresAt: number } | null = null;
 
 /**
+ * 取北京时间（Vercel 服务器时区是 UTC，直接用本地时间会差 8 小时，
+ * 文件命名和 create time 都会错位 —— 显式加 8 小时偏移）
+ */
+function nowBeijing(): Date {
+  return new Date(Date.now() + 8 * 3600 * 1000);
+}
+
+/**
  * 获取微信接口调用凭据（access_token），有效期 7200s，提前 5 分钟刷新
  */
 async function getAccessToken(appId: string, appSecret: string): Promise<string | null> {
@@ -150,7 +158,7 @@ async function processAccounting(msg: WechatMessage): Promise<void> {
     return;
   }
 
-  const now = new Date();
+  const now = nowBeijing();
   const pad = (n: number) => String(n).padStart(2, '0');
   const month = `${now.getFullYear()}-${pad(now.getMonth() + 1)}`;
   const timeStr = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
@@ -217,7 +225,7 @@ async function writeInboxFallback(
   if (!config) {
     return false;
   }
-  const now = new Date();
+  const now = nowBeijing();
   const pad = (n: number) => String(n).padStart(2, '0');
   const timeStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}  ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
   const fileName = buildFileName(msg, now);
@@ -281,7 +289,7 @@ async function processAdminAccounting(
   const line = `[${category}:: ${entry.note} ¥${entry.amount}]`;
 
   // 当日日志路径（与 vault 的月度目录格式一致：「9 月」有空格）
-  const now = new Date();
+  const now = nowBeijing();
   const pad = (n: number) => String(n).padStart(2, '0');
   const filePath = `log/${now.getFullYear()}/${now.getMonth() + 1} 月/${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}.md`;
 
@@ -360,7 +368,7 @@ export async function processWechatMessage(msg: WechatMessage): Promise<void> {
     return;
   }
 
-  const now = new Date();
+  const now = nowBeijing();
   const fileName = buildFileName(msg, now);
 
   // 确保目录存在后写入（失败重试一次，坚果云偶发抖动）
