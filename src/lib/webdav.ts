@@ -46,6 +46,10 @@ export async function putFile(
     },
     body: content,
   });
+  if (!resp.ok) {
+    // 写入失败（认证/配额/频率限制）打出来，否则上层只看到「失败」不知道原因
+    console.error('[webdav] PUT failed:', resp.status, filePath);
+  }
   return resp.ok;
 }
 
@@ -65,6 +69,8 @@ export async function getFile(
     return null;
   }
   if (!resp.ok) {
+    // 非 404 的失败（如 401 认证失败）也要留痕，调用方才能区分「不存在」和「读失败」
+    console.error('[webdav] GET failed:', resp.status, filePath);
     return null;
   }
   return resp.text();

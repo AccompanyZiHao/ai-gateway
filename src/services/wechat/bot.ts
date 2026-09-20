@@ -28,6 +28,8 @@ async function getAccessToken(appId: string, appSecret: string): Promise<string 
   );
   const data = (await resp.json()) as { access_token?: string; expires_in?: number };
   if (!data.access_token) {
+    // 拿不到 token 是「完全不回复」的头号嫌疑，必须把微信返回的错误打出来
+    console.error('[wechat] get token failed:', JSON.stringify(data));
     return null;
   }
   cachedToken = {
@@ -51,20 +53,31 @@ async function replyText(toUser: string, content: string): Promise<void> {
   if (!token) {
     return;
   }
-  await fetch(
-    `https://api.weixin.qq.com/cgi-bin/message/custom/send?access_token=${token}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        touser: toUser,
-        msgtype: 'text',
-        text: { content },
-      }),
-    },
-  ).catch(() => {
-    // 回复失败不影响入库，静默即可
-  });
+  try {
+    const resp = await fetch(
+      `https://api.weixin.qq.com/cgi-bin/message/custom/send?access_token=${token}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          touser: toUser,
+          msgtype: 'text',
+          text: { content },
+        }),
+      },
+    );
+    // 微信接口正常 HTTP 200 也可能带 errcode（如 45009、40001），必须检查响应体
+    const result = (await resp.json().catch(() => null)) as {
+      errcode?: number;
+      errmsg?: string;
+    } | null;
+    if (result?.errcode) {
+      console.error('[wechat] reply err:', JSON.stringify(result));
+    }
+  } catch (err) {
+    // 回复失败不影响入库，但错误要留痕（否则就是「完全不回」的无头案）
+    console.error('[wechat] reply network error:', err);
+  }
 }
 
 /**

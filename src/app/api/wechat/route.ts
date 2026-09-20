@@ -49,7 +49,12 @@ export async function POST(request: NextRequest) {
 
   // 先回 success 断掉微信的 5s 计时器，再用 after() 在响应后入库 + 客服回复
   after(async () => {
-    await processWechatMessage(msg);
+    try {
+      await processWechatMessage(msg);
+    } catch (err) {
+      // after() 里的异常微信侧完全感知不到，不捕获就会静默丢失
+      console.error('[wechat] process failed:', err);
+    }
   });
 
   return new NextResponse('success');
