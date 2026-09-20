@@ -26,23 +26,7 @@ function nowBeijing(): Date {
 }
 
 /**
- * 把消息组装成 inbox 条目的 markdown 内容（格式对齐 vault 的 AGENTS.md 规范）
- */
-function buildMarkdown(msg: WecomMessage, time: Date): string {
-  const pad = (n: number) => String(n).padStart(2, '0');
-  const timeStr = `${time.getFullYear()}-${pad(time.getMonth() + 1)}-${pad(time.getDate())}  ${pad(time.getHours())}:${pad(time.getMinutes())}:${pad(time.getSeconds())}`;
-
-  return `---
-create time: ${timeStr}
-source: wecom
----
-
-${msg.content ?? ''}
-`;
-}
-
-/**
- * 生成入库文件名：日期时间 + 消息id 后4位（防同秒冲突 + 可追溯）
+ * 生成兜底入库文件名：日期时间 + 消息id 后4位（防同秒冲突 + 可追溯；兜底文件保持独立，不按天合并）
  */
 function buildFileName(msg: WecomMessage, time: Date): string {
   const pad = (n: number) => String(n).padStart(2, '0');
@@ -85,6 +69,40 @@ ${body}
   if (ok) {
     // 兜底成功也留痕：能从日志直接看出这条消息走了兜底
     console.log('[wecom] fallback inbox saved:', fileName, `(${reason})`);
+  }
+  return ok;
+}
+
+/**
+ * 收集消息按「日期 + userid」追加到当天文件（一条一文件改为按天合并，2026-09-20 用户确认）
+ * 文件内每条消息用 `## HH:mm:ss` 标题分块；首条消息负责建 frontmatter
+ * 已知限制：读-改-写有并发窗口，同秒连发两条理论上会丢一条（手动打字场景碰不到）
+ */
+async function appendDailyCollection(
+  msg: WecomMessage,
+  time: Date,
+): Promise<boolean> {
+  const config = webdavConfigFromEnv();
+  if (!config) {
+    return false;
+  }
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const dateStr = `${time.getFullYear()}-${pad(time.getMonth() + 1)}-${pad(time.getDate())}`;
+  const hms = `${pad(time.getHours())}:${pad(time.getMinutes())}:${pad(time.getSeconds())}`;
+  const fileName = `inbox/${dateStr}_${msg.fromUserName}.md`;
+
+  const block = `## ${hms}\n\n${msg.content ?? ''}\n`;
+  const existing = await getFile(config, fileName);
+  // 首条建带头文件（create time 记当天首条时间），之后纯追加
+  const header = `---\ncreate time: ${dateStr}  ${hms}\nsource: wecom\n---\n\n`;
+  const content = existing
+    ? `${existing.replace(/\s*$/, '')}\n\n${block}`
+    : `${header}${block}`;
+
+  await ensureDirectory(config, 'inbox');
+  const ok = await putFile(config, fileName, content);
+  if (ok) {
+    console.log('[wecom] inbox appended:', fileName);
   }
   return ok;
 }
@@ -240,14 +258,13 @@ export async function processWecomMessage(msg: WecomMessage): Promise<string> {
   }
 
   const now = nowBeijing();
-  const fileName = buildFileName(msg, now);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const fileName = `inbox/${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${msg.fromUserName}.md`;
 
-  // 确保目录存在后写入（失败重试一次，坚果云偶发抖动）
-  await ensureDirectory(config, 'inbox');
-  let ok = await putFile(config, fileName, buildMarkdown(msg, now));
+  // 按天合并追加（失败重试一次，坚果云偶发抖动）
+  let ok = await appendDailyCollection(msg, now);
   if (!ok) {
-    await ensureDirectory(config, 'inbox');
-    ok = await putFile(config, fileName, buildMarkdown(msg, now));
+    ok = await appendDailyCollection(msg, now);
   }
 
   if (!ok) {
@@ -255,7 +272,6 @@ export async function processWecomMessage(msg: WecomMessage): Promise<string> {
   }
 
   // 成功也留痕：收集消息落盘的文件名
-  console.log('[wecom] inbox saved:', fileName);
   // 未配置管理员时，附带一次 userid 提示（配置后此提示不再出现）
   if (!adminUserid) {
     return `✅ 已收录 → ${fileName}\n🔧 管理员提示：你的 userid 是 ${msg.fromUserName}。配置环境变量 WECOM_ADMIN_USERID 后，其他成员将只能使用记账功能`;

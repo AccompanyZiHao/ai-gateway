@@ -91,37 +91,50 @@ async function replyText(toUser: string, content: string): Promise<void> {
 }
 
 /**
- * 把消息组装成 inbox 条目的 markdown 内容
- * 属性格式对齐 ob vault 的 AGENTS.md 规范（create time + source）
+ * 收集消息按「日期 + openid」追加到当天文件（2026-09-20 与企业微信通道同步改为按天合并）
+ * 文件内每条消息用 `## HH:mm:ss` 标题分块；首条消息负责建 frontmatter
  */
-function buildMarkdown(msg: WechatMessage, time: Date): string {
-  let body = '';
+async function appendDailyCollection(
+  msg: WechatMessage,
+  time: Date,
+): Promise<boolean> {
+  const config = webdavConfigFromEnv();
+  if (!config) {
+    return false;
+  }
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const dateStr = `${time.getFullYear()}-${pad(time.getMonth() + 1)}-${pad(time.getDate())}`;
+  const hms = `${pad(time.getHours())}:${pad(time.getMinutes())}:${pad(time.getSeconds())}`;
+  const fileName = `inbox/${dateStr}_${msg.fromUserName}.md`;
 
+  // 正文构造复用单文件版逻辑（文字/语音识别文本/链接三种形态）
+  let body = '';
   if (msg.msgType === 'text') {
     body = msg.content ?? '';
   } else if (msg.msgType === 'voice') {
-    // 语音：正文放识别文本，标注来源是语音
     body = `${msg.recognition ?? '（语音识别为空）'}\n\n> 🎤 语音输入`;
   } else if (msg.msgType === 'link') {
-    // 链接：存为待读条目，正文提炼由周五分流时人工判断
     body = `[${msg.title ?? '无标题'}](${msg.url ?? ''})\n\n${msg.description ?? ''}\n\n> 🔗 链接待读`;
   }
 
-  // 补零格式的本地时间字符串，与 vault 现有属性格式一致
-  const pad = (n: number) => String(n).padStart(2, '0');
-  const timeStr = `${time.getFullYear()}-${pad(time.getMonth() + 1)}-${pad(time.getDate())}  ${pad(time.getHours())}:${pad(time.getMinutes())}:${pad(time.getSeconds())}`;
+  const block = `## ${hms}\n\n${body}\n`;
+  const existing = await getFile(config, fileName);
+  // 首条建带头文件（create time 记当天首条时间），之后纯追加
+  const header = `---\ncreate time: ${dateStr}  ${hms}\nsource: wechat\n---\n\n`;
+  const content = existing
+    ? `${existing.replace(/\s*$/, '')}\n\n${block}`
+    : `${header}${block}`;
 
-  return `---
-create time: ${timeStr}
-source: wechat
----
-
-${body}
-`;
+  await ensureDirectory(config, 'inbox');
+  const ok = await putFile(config, fileName, content);
+  if (ok) {
+    console.log('[wechat] inbox appended:', fileName);
+  }
+  return ok;
 }
 
 /**
- * 生成入库文件名：日期时间 + 消息id 后4位（防同秒冲突 + 可追溯）
+ * 生成兜底入库文件名：日期时间 + 消息id 后4位（防同秒冲突 + 可追溯；兜底文件保持独立，不按天合并）
  */
 function buildFileName(msg: WechatMessage, time: Date): string {
   const pad = (n: number) => String(n).padStart(2, '0');
@@ -369,14 +382,12 @@ export async function processWechatMessage(msg: WechatMessage): Promise<void> {
   }
 
   const now = nowBeijing();
-  const fileName = buildFileName(msg, now);
+  const fileName = `inbox/${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}_${msg.fromUserName}.md`;
 
-  // 确保目录存在后写入（失败重试一次，坚果云偶发抖动）
-  await ensureDirectory(config, 'inbox');
-  let ok = await putFile(config, fileName, buildMarkdown(msg, now));
+  // 按天合并追加（失败重试一次，坚果云偶发抖动）
+  let ok = await appendDailyCollection(msg, now);
   if (!ok) {
-    await ensureDirectory(config, 'inbox');
-    ok = await putFile(config, fileName, buildMarkdown(msg, now));
+    ok = await appendDailyCollection(msg, now);
   }
 
   if (ok) {
