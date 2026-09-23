@@ -40,3 +40,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# 设计文档仅保留在本地,不入公开仓库
+docs/plans/
